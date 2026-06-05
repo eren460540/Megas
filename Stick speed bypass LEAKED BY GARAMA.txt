@@ -1,0 +1,247 @@
+------ LEAKED BY GARAMA JAJAJAJAJAJ 
+▓█▀▀█ ░█▀▀█ ░█▀▀█ ─█▀▀█ ░█▀▄▀█ ─█▀▀█
+░█─▄▄ ░█▄▄█ ░█▄▄▀ ░█▄▄█ ░█░█░█ ░█▄▄█
+░█▄▄█ ░█─░█ ░█─░█ ░█─░█ ░█──░█ ░█─░█
+
+░█▀▀▀█ ░█▄─░█ 　 ▀▀█▀▀ ░█▀▀▀█ ░█▀▀█
+░█──░█ ░█░█░█ 　 ─░█── ░█──░█ ░█▄▄█
+░█▄▄▄█ ░█──▀█ 　 ─░█── ░█▄▄▄█ ░█───
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UIS = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
+
+local player = Players.LocalPlayer
+local FILE_NAME = "StickSpeed_Ultimate_Config.json"
+
+-- Variables de Estado
+local isLagOn, isSpeedOn = false, false -- Siempre inician en false
+local lagAmount, speedAmount = 0, 16
+local isMinimized = false
+local lastPos = UDim2.fromScale(0.5, 0.5) -- Posición central por defecto
+
+-- GUI Principal
+local gui = Instance.new("ScreenGui", game.CoreGui)
+gui.Name = "StickSpeed_Persistent"
+gui.ResetOnSpawn = false
+
+local main = Instance.new("Frame", gui)
+main.Size = UDim2.fromOffset(260, 210)
+main.Position = lastPos
+main.AnchorPoint = Vector2.new(0.5, 0.5)
+main.BackgroundColor3 = Color3.fromRGB(12, 12, 12)
+main.BackgroundTransparency = 0.2
+main.BorderSizePixel = 0
+main.ClipsDescendants = true
+Instance.new("UICorner", main).CornerRadius = UDim.new(0, 10)
+
+local stroke = Instance.new("UIStroke", main)
+stroke.Color = Color3.fromRGB(0, 255, 100)
+stroke.Thickness = 2
+
+--- SISTEMA DE GUARDADO AVANZADO ---
+local function saveSettings()
+    local data = {
+        lag = lagAmount,
+        spd = speedAmount,
+        minimized = isMinimized,
+        posX = main.Position.X.Scale,
+        posY = main.Position.Y.Scale,
+        offsetX = main.Position.X.Offset,
+        offsetY = main.Position.Y.Offset
+    }
+    if writefile then
+        pcall(function() writefile(FILE_NAME, HttpService:JSONEncode(data)) end)
+    end
+end
+
+local function loadSettings()
+    if isfile and isfile(FILE_NAME) then
+        local success, data = pcall(function() return HttpService:JSONDecode(readfile(FILE_NAME)) end)
+        if success then
+            lagAmount = data.lag or 0
+            speedAmount = data.spd or 16
+            isMinimized = data.minimized or false
+            lastPos = UDim2.new(data.posX or 0.5, data.offsetX or 0, data.posY or 0.5, data.offsetY or 0)
+            
+            -- Aplicar posición cargada
+            main.Position = lastPos
+            
+            -- Aplicar estado de minimizado cargado
+            if isMinimized then
+                main.Size = UDim2.fromOffset(260, 90)
+            end
+        end
+    end
+end
+
+-- Título (Zona de arrastre)
+local title = Instance.new("TextLabel", main)
+title.Size = UDim2.new(1, -60, 0, 35)
+title.Position = UDim2.fromOffset(15, 5)
+title.BackgroundTransparency = 1
+title.Text = "STICK SPEED BYPASS"
+title.Font = Enum.Font.GothamBold
+title.TextSize = 14
+title.TextColor3 = Color3.fromRGB(0, 255, 150)
+title.TextXAlignment = Enum.TextXAlignment.Left
+
+-- Botón +/- (Minimizar)
+local toggleSizeBtn = Instance.new("TextButton", main)
+toggleSizeBtn.Size = UDim2.fromOffset(25, 25)
+toggleSizeBtn.Position = UDim2.new(1, -35, 0, 10)
+toggleSizeBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+toggleSizeBtn.Text = isMinimized and "+" or "-"
+toggleSizeBtn.TextColor3 = Color3.new(1, 1, 1)
+toggleSizeBtn.Font = Enum.Font.GothamBold
+Instance.new("UICorner", toggleSizeBtn)
+
+-- Botón ACTIVE ALL
+local allBtn = Instance.new("TextButton", main)
+allBtn.Size = UDim2.new(0.9, 0, 0, 35)
+allBtn.Position = UDim2.new(0.05, 0, 0, 45)
+allBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+allBtn.Text = "ACTIVE ALL: OFF"
+allBtn.TextColor3 = Color3.new(1, 1, 1)
+allBtn.Font = Enum.Font.GothamBold
+Instance.new("UICorner", allBtn)
+
+-- Contenedor de Sliders
+local content = Instance.new("Frame", main)
+content.Size = UDim2.new(1, 0, 1, -90)
+content.Position = UDim2.fromOffset(0, 90)
+content.BackgroundTransparency = 1
+content.Visible = not isMinimized
+
+local function updateUI()
+    local act = (isLagOn and isSpeedOn)
+    allBtn.Text = act and "ACTIVE ALL: ON" or "ACTIVE ALL: OFF"
+    allBtn.TextColor3 = act and Color3.fromRGB(0, 255, 100) or Color3.new(1, 1, 1)
+    allBtn.BackgroundColor3 = act and Color3.fromRGB(15, 45, 15) or Color3.fromRGB(25, 25, 25)
+end
+
+-- Lógica Minimizar
+toggleSizeBtn.MouseButton1Click:Connect(function()
+    isMinimized = not isMinimized
+    main:TweenSize(isMinimized and UDim2.fromOffset(260, 90) or UDim2.fromOffset(260, 210), "Out", "Quad", 0.2, true)
+    content.Visible = not isMinimized
+    toggleSizeBtn.Text = isMinimized and "+" or "-"
+    saveSettings()
+end)
+
+allBtn.MouseButton1Click:Connect(function()
+    local n = not (isLagOn and isSpeedOn)
+    isLagOn, isSpeedOn = n, n
+    updateUI()
+end)
+
+-- SISTEMA DE SLIDERS
+local function createSlider(parent, y, name, min, max, isPercent)
+    local lab = Instance.new("TextLabel", parent)
+    lab.Size = UDim2.new(1, 0, 0, 20)
+    lab.Position = UDim2.fromOffset(0, y)
+    lab.BackgroundTransparency = 1
+    lab.TextColor3 = Color3.fromRGB(200, 255, 200)
+    lab.Font = Enum.Font.GothamMedium
+    lab.TextSize = 13
+
+    local bg = Instance.new("Frame", parent)
+    bg.Size = UDim2.fromOffset(200, 6)
+    bg.Position = UDim2.new(0.5, -100, 0, y + 25)
+    bg.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    Instance.new("UICorner", bg)
+
+    local fill = Instance.new("Frame", bg)
+    fill.Size = UDim2.fromScale(0, 1)
+    fill.BackgroundColor3 = Color3.fromRGB(0, 255, 100)
+    Instance.new("UICorner", fill)
+
+    local knob = Instance.new("Frame", bg)
+    knob.Size = UDim2.fromOffset(14, 14)
+    knob.AnchorPoint = Vector2.new(0.5, 0.5)
+    knob.Position = UDim2.fromScale(0, 0.5)
+    knob.BackgroundColor3 = Color3.new(1, 1, 1)
+    Instance.new("UICorner", knob)
+
+    local function updateVisual(val)
+        local p = math.clamp((val - (isPercent and 0 or min)) / (isPercent and 1 or (max - min)), 0, 1)
+        fill.Size = UDim2.fromScale(p, 1)
+        knob.Position = UDim2.fromScale(p, 0.5)
+        lab.Text = name .. ": " .. (isPercent and math.floor(val * 100) .. "%" or math.floor(val))
+    end
+
+    local dragging = false
+    bg.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+        end
+    end)
+
+    UIS.InputChanged:Connect(function(i)
+        if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+            local rel = math.clamp((i.Position.X - bg.AbsolutePosition.X) / bg.AbsoluteSize.X, 0, 1)
+            local val = isPercent and rel or (min + (rel * (max - min)))
+            updateVisual(val)
+            if isPercent then lagAmount = val else speedAmount = val end
+            saveSettings()
+        end
+    end)
+
+    UIS.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+
+    return updateVisual
+end
+
+local upLag = createSlider(content, 0, "Lag", 0, 1, true)
+local upSpd = createSlider(content, 55, "Speed", 16, 250, false)
+
+-- ARRASTRE DE VENTANA
+local winDragging, dragStart, startPos
+title.InputBegan:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+        winDragging = true
+        dragStart = i.Position
+        startPos = main.Position
+    end
+end)
+
+UIS.InputChanged:Connect(function(i)
+    if winDragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+        local delta = i.Position - dragStart
+        main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+UIS.InputEnded:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+        if winDragging then
+            winDragging = false
+            saveSettings() -- Guardar posición al soltar
+        end
+    end
+end)
+
+-- CARGAR AJUSTES AL INICIO
+loadSettings()
+upLag(lagAmount)
+upSpd(speedAmount)
+updateUI()
+
+-- LOOP DE EJECUCIÓN
+RunService.RenderStepped:Connect(function()
+    if isSpeedOn and player.Character then
+        local root = player.Character:FindFirstChild("HumanoidRootPart")
+        local hum = player.Character:FindFirstChildOfClass("Humanoid")
+        if root and hum and hum.MoveDirection.Magnitude > 0 then
+            root.AssemblyLinearVelocity = Vector3.new(hum.MoveDirection.X * speedAmount, root.AssemblyLinearVelocity.Y, hum.MoveDirection.Z * speedAmount)
+        end
+    end
+    if isLagOn and lagAmount > 0 then
+        local target = tick() + (lagAmount * 0.1)
+        while tick() < target do end
+    end
+end)
