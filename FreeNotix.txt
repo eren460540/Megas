@@ -1,0 +1,908 @@
+repeat task.wait() until game:IsLoaded()
+
+-- ===================== INTRO SEQUENCE =====================
+do
+	local _TS  = game:GetService("TweenService")
+	local _SS  = game:GetService("SoundService")
+	local _PL  = game:GetService("Players").LocalPlayer
+	local _PG  = _PL:WaitForChild("PlayerGui")
+
+	local screenGui = Instance.new("ScreenGui")
+	screenGui.Name = "NotixIntro"
+	screenGui.ResetOnSpawn = false
+	screenGui.IgnoreGuiInset = true
+	screenGui.DisplayOrder = 999
+	screenGui.Parent = _PG
+
+	local bg = Instance.new("Frame")
+	bg.Size = UDim2.new(1,0,1,0)
+	bg.BackgroundColor3 = Color3.new(0,0,0)
+	bg.BackgroundTransparency = 0.4
+	bg.BorderSizePixel = 0
+	bg.Parent = screenGui
+
+	local image = Instance.new("ImageLabel")
+	image.Size = UDim2.new(1,0,1,0)
+	image.BackgroundTransparency = 1
+	image.Image = "rbxassetid://9jqQm"
+	image.ImageColor3 = Color3.fromRGB(0,200,255)
+	image.ImageTransparency = 1
+	image.Parent = bg
+
+	local title = Instance.new("TextLabel")
+	title.Size = UDim2.new(0.9,0,0.25,0)
+	title.Position = UDim2.new(0.05,0,0.35,0)
+	title.BackgroundTransparency = 1
+	title.Text = "Notix"
+	title.TextColor3 = Color3.fromRGB(0,200,255)
+	title.TextTransparency = 1
+	title.TextScaled = true
+	title.Font = Enum.Font.GothamBlack
+	title.TextStrokeTransparency = 0.2
+	title.TextStrokeColor3 = Color3.new(0,0,0)
+	title.Parent = bg
+
+	local sound = Instance.new("Sound")
+	sound.SoundId = "rbxassetid://7777392893"
+	sound.Volume = 1.0
+	sound.Looped = false
+	sound.Parent = _SS
+	sound:Play()
+
+	local fadeIn = TweenInfo.new(0.1, Enum.EasingStyle.Quint)
+	_TS:Create(image, fadeIn, {ImageTransparency = 0}):Play()
+	_TS:Create(title, fadeIn, {TextTransparency = 0}):Play()
+
+	task.wait(6)
+
+	local fadeOut = TweenInfo.new(1.3, Enum.EasingStyle.Quint)
+	_TS:Create(bg,    fadeOut, {BackgroundTransparency = 1}):Play()
+	_TS:Create(image, fadeOut, {ImageTransparency = 1}):Play()
+	_TS:Create(title, fadeOut, {TextTransparency = 1}):Play()
+
+	task.wait(1.7)
+	screenGui:Destroy()
+	sound:Stop()
+	sound:Destroy()
+end
+-- ===================== END INTRO =====================
+
+local Players    = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UIS        = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local HttpService  = game:GetService("HttpService")
+local Lighting     = game:GetService("Lighting")
+local LP = Players.LocalPlayer
+
+-- ===================== CONSTANTS =====================
+local NS, CS, LS, DAS, DAD = 60, 30, 12.8, 150, 0.2
+local MEDUSA_COOLDOWN      = 25
+local STEAL_COOLDOWN       = 0.1
+local PLOT_CACHE_DURATION  = 2
+local PROMPT_CACHE_REFRESH = 0.15
+
+-- ===================== STATE =====================
+local speedMode           = false
+local laggerMode          = false
+local antiRagdollEnabled  = false
+local infJumpEnabled      = false
+local medusaCounterEnabled= false
+local batCounterEnabled   = false
+local unwalkEnabled       = false
+local floatEnabled        = false
+local floatHeight         = 9.5
+local floatJumping        = false
+local medusaDebounce      = false
+local medusaLastUsed      = 0
+local dropActive          = false
+local stretchRezEnabled   = false
+local autoBatEnabled      = false
+local autoLeftEnabled     = false
+local autoRightEnabled    = false
+local _anyKeyListening    = false
+local guiLocked           = true
+
+local KB = {
+	DropBrainrot = {kb=Enum.KeyCode.X,           gp=nil},
+	AutoLeft     = {kb=Enum.KeyCode.Z,           gp=nil},
+	AutoRight    = {kb=Enum.KeyCode.C,           gp=nil},
+	AutoBat      = {kb=Enum.KeyCode.E,           gp=nil},
+	LaggerMode   = {kb=Enum.KeyCode.R,           gp=nil},
+	GuiHide      = {kb=Enum.KeyCode.LeftControl, gp=nil},
+	Float        = {kb=Enum.KeyCode.J,           gp=nil},
+	SpeedToggle  = {kb=Enum.KeyCode.Q,           gp=nil},
+	TPDown       = {kb=Enum.KeyCode.F,           gp=nil},
+}
+local function kbMatch(e,kc) return kc==e.kb or (e.gp~=nil and kc==e.gp) end
+
+-- ===================== POSITIONS =====================
+local AP_L1=Vector3.new(-476.48,-6.28,92.73)
+local AP_L2=Vector3.new(-483.12,-4.95,94.80)
+local AP_L_FACE=Vector3.new(-482.25,-4.96,92.09)
+local AP_R1=Vector3.new(-476.16,-6.52,25.62)
+local AP_R2=Vector3.new(-483.06,-5.03,25.48)
+local AP_R_FACE=Vector3.new(-482.06,-6.93,35.47)
+
+-- ===== MOBILE PANEL DIMENSIONS (promoted so saveConfig/loadConfig can access them) =====
+local MB_BTN_W  = 68   -- slightly wider for rectangle shape
+local MB_BTN_H  = 44   -- slightly shorter for rectangle shape
+local MB_COLS   = 2
+local MB_ROWS   = 4
+local MB_PAD    = 3    -- tight gap between buttons
+local MB_CORNER = 7   -- rectangle with curved corners
+local MB_TOTAL_W = MB_COLS * MB_BTN_W + (MB_COLS+1) * MB_PAD
+local MB_TOTAL_H = MB_ROWS * MB_BTN_H + (MB_ROWS+1) * MB_PAD
+local mbPanel   = nil  -- assigned below during GUI build
+local Steal={AutoStealEnabled=false,StealRadius=20,StealDuration=0.25,
+	Data={},plotCache={},plotCacheTime={},cachedPrompts={},promptCacheTime=0}
+local isStealing,stealStartTime,lastStealTick=false,nil,0
+local Conns={autoSteal=nil,antiRag=nil,float=nil,anchor={},progress=nil}
+
+-- ===================== FORWARD DECLARED GUI REFS =====================
+local progressFill,progressPct,progressRadLbl
+local modeValLbl,setFloat
+local autoLeftSetVisual,autoRightSetVisual,autoBatSetVisual
+local setAutoStealVisual,setInfJumpVisual,setAntiRagVisual
+local setMedusaVisual,setUnwalkVisual,setStretchRezVisual,setBatCounterVisual
+local setLaggerVisual
+local normalBox,carryBox,laggerBox,radInput,durationInput,floatHeightBox
+local mbPanelButtons = {}  -- forward declared so saveConfig can access it
+
+local function resetProgressBar()
+	if progressPct  then progressPct.Text="0%" end
+	if progressFill then progressFill.Size=UDim2.new(0,0,1,0) end
+end
+
+-- ===================== SAVE CONFIG =====================
+-- Defined early so all toggle callbacks can call it safely
+local function saveConfig()
+	local function ks(e) return {kb=e.kb and e.kb.Name or nil,gp=e.gp and e.gp.Name or nil} end
+	local cfg={
+		normalSpeed=NS, carrySpeed=CS, laggerSpeed=LS,
+		dropBrainrotKey=ks(KB.DropBrainrot), autoLeftKey=ks(KB.AutoLeft),
+		autoRightKey=ks(KB.AutoRight), autoBatKey=ks(KB.AutoBat),
+		laggerModeKey=ks(KB.LaggerMode), guiHideKey=ks(KB.GuiHide),
+		floatKey=ks(KB.Float), speedToggleKey=ks(KB.SpeedToggle),
+		tpDownKey=ks(KB.TPDown),
+		grabRadius=Steal.StealRadius, stealDuration=Steal.StealDuration,
+		antiRagdoll=antiRagdollEnabled, autoStealEnabled=Steal.AutoStealEnabled,
+		infiniteJump=infJumpEnabled, medusaCounter=medusaCounterEnabled,
+		batCounter=batCounterEnabled, laggerMode=laggerMode,
+		carryMode=speedMode, autoBat=autoBatEnabled, unwalkEnabled=unwalkEnabled,
+		floatHeight=floatHeight, floatEnabled=floatEnabled, stretchRez=stretchRezEnabled,
+		mbBtnW=MB_BTN_W, mbBtnH=MB_BTN_H,
+	}
+	-- Save each floating button's individual position
+	local btnPositions={}
+	for i,btn in ipairs(mbPanelButtons) do
+		if btn:IsA("TextButton") then
+			local p=btn.Position
+			btnPositions[i]={xs=p.X.Scale,xo=p.X.Offset,ys=p.Y.Scale,yo=p.Y.Offset}
+		end
+	end
+	cfg.mbBtnPositions=btnPositions
+	if writefile then pcall(function() writefile("NotixConfig.json",HttpService:JSONEncode(cfg)) end) end
+end
+task.spawn(function() while task.wait(5) do saveConfig() end end)
+
+-- ===================== AUTO STEAL =====================
+local function startAutoSteal()
+	if Conns.autoSteal then Conns.autoSteal:Disconnect() end
+	Conns.autoSteal=RunService.Heartbeat:Connect(function()
+		if not Steal.AutoStealEnabled then return end
+		local plr=LP;if not plr or not plr.Character then return end
+		local pHrp=plr.Character:FindFirstChild("HumanoidRootPart")
+		if not pHrp then return end
+		local now=tick()
+		if now-lastStealTick<STEAL_COOLDOWN then return end
+		local args={
+			[1]={
+				Range=Steal.StealRadius,
+				Duration=Steal.StealDuration,
+				IncludeTeammates=false,
+				FilterDescendantsInstances={plr.Character}
+			}
+		}
+		pcall(function()
+			local remotes=game:GetService("ReplicatedStorage"):FindFirstChild("Remotes")
+			if remotes then
+				local grabRemote=remotes:FindFirstChild("Grab")
+				if grabRemote then grabRemote:FireServer(unpack(args[1] and {args[1]} or {})) end
+			end
+		end)
+		lastStealTick=now
+	end)
+end
+
+local function stopAutoSteal()
+	if Conns.autoSteal then Conns.autoSteal:Disconnect();Conns.autoSteal=nil end
+end
+
+-- ===================== ANTI RAGDOLL =====================
+local function startAntiRagdoll()
+	if Conns.antiRag then Conns.antiRag:Disconnect() end
+	Conns.antiRag=RunService.Heartbeat:Connect(function()
+		if not antiRagdollEnabled then return end
+		local plr=LP;if not plr or not plr.Character then return end
+		for _,part in ipairs(plr.Character:GetDescendants()) do
+			if part:IsA("Motor6D") then part.Enabled=true end
+		end
+	end)
+end
+
+local function stopAntiRagdoll()
+	if Conns.antiRag then Conns.antiRag:Disconnect();Conns.antiRag=nil end
+end
+
+-- ===================== FLOAT =====================
+local function startFloat()
+	if Conns.float then Conns.float:Disconnect() end
+	Conns.float=RunService.Heartbeat:Connect(function()
+		if not floatEnabled then return end
+		local plr=LP;if not plr or not plr.Character then return end
+		local hrp=plr.Character:FindFirstChild("HumanoidRootPart")
+		local hum=plr.Character:FindFirstChild("Humanoid")
+		if not hrp or not hum then return end
+		hrp.CFrame=hrp.CFrame+Vector3.new(0,0.02,0)
+	end)
+end
+
+local function stopFloat()
+	if Conns.float then Conns.float:Disconnect();Conns.float=nil end
+end
+
+-- ===================== INFINITE JUMP =====================
+local function startInfiniteJump()
+	UIS.InputBegan:Connect(function(inp,gp)
+		if gp then return end
+		if inp.KeyCode == Enum.KeyCode.Space then
+			local plr=LP;if not plr or not plr.Character then return end
+			local hum=plr.Character:FindFirstChild("Humanoid")
+			if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
+		end
+	end)
+end
+
+-- ===================== MEDUSA COUNTER =====================
+local function setupMedusa(character)
+	if not character then return end
+	local hum=character:FindFirstChild("Humanoid")
+	if hum then
+		hum.StateChanged:Connect(function(oldState,newState)
+			if newState == Enum.HumanoidStateType.Ragdoll and medusaCounterEnabled then
+				if not medusaDebounce and tick()-medusaLastUsed >= MEDUSA_COOLDOWN then
+					medusaDebounce=true
+					medusaLastUsed=tick()
+					task.wait(0.5)
+					medusaDebounce=false
+				end
+			end
+		end)
+	end
+end
+
+LP.CharacterAdded:Connect(function(character)
+	if medusaCounterEnabled then setupMedusa(character) end
+end)
+
+-- ===================== BAT COUNTER =====================
+local function startBatCounter()
+	RunService.Heartbeat:Connect(function()
+		if not batCounterEnabled then return end
+	end)
+end
+
+-- ===================== SPEED FUNCTIONS =====================
+local function applySpeed()
+	local plr=LP;if not plr or not plr.Character then return end
+	local humanoid=plr.Character:FindFirstChild("Humanoid")
+	if humanoid then
+		humanoid.WalkSpeed = speedMode and CS or NS
+	end
+end
+
+-- ===================== LAGGER MODE =====================
+local function startLaggerMode()
+	if laggerMode then
+		local plr=LP;if not plr or not plr.Character then return end
+		local humanoid=plr.Character:FindFirstChild("Humanoid")
+		if humanoid then humanoid.WalkSpeed=LS end
+	end
+end
+
+local function stopLaggerMode()
+	applySpeed()
+end
+
+-- ===================== AUTO LEFT/RIGHT =====================
+local function startAutoLeft()
+	-- Auto attack left
+end
+
+local function stopAutoLeft()
+	-- Stop auto attack left
+end
+
+local function startAutoRight()
+	-- Auto attack right
+end
+
+local function stopAutoRight()
+	-- Stop auto attack right
+end
+
+-- ===================== RUN DROP =====================
+local function runDrop()
+	if dropActive then return end
+	dropActive=true
+	task.wait(0.5)
+	dropActive=false
+end
+
+-- ===================== RUN TP DOWN =====================
+local function runTPDown()
+	local plr=LP;if not plr or not plr.Character then return end
+	local hrp=plr.Character:FindFirstChild("HumanoidRootPart")
+	if hrp then
+		hrp.CFrame=hrp.CFrame+Vector3.new(0,-5,0)
+	end
+end
+
+-- ===================== DISABLE ANIMATIONS =====================
+local function disableAnimations()
+	local plr=LP;if not plr or not plr.Character then return end
+	local humanoid=plr.Character:FindFirstChild("Humanoid")
+	if humanoid then
+		for _,anim in ipairs(humanoid:GetPlayingAnimationTracks()) do
+			anim:Stop()
+		end
+	end
+end
+
+-- ===================== STRETCH REZ =====================
+local function enableStretchRez()
+	local plr=LP;if not plr or not plr.Character then return end
+	local hrp=plr.Character:FindFirstChild("HumanoidRootPart")
+	if hrp then
+		hrp.Size=Vector3.new(0.1,0.1,0.1)
+	end
+end
+
+-- ===================== COLOR CONSTANTS (IMPROVED UI) =====================
+-- Modern cyan/electric blue color scheme for better aesthetics
+local PRIMARY_COLOR     = Color3.fromRGB(0, 200, 255)     -- Electric cyan
+local SECONDARY_COLOR   = Color3.fromRGB(10, 220, 255)    -- Bright cyan
+local DARK_BG           = Color3.fromRGB(12, 12, 16)      -- Deep dark blue-gray
+local DARKER_BG         = Color3.fromRGB(8, 8, 12)        -- Even darker background
+local ACCENT_COLOR      = Color3.fromRGB(0, 150, 200)     -- Darker cyan
+local BORDER1           = Color3.fromRGB(0, 180, 220)     -- Cyan border
+local BORDER2           = Color3.fromRGB(0, 160, 200)     -- Darker cyan border
+local TEXT_PRIMARY      = Color3.fromRGB(240, 248, 255)   -- Light cyan-white
+local TEXT_SECONDARY    = Color3.fromRGB(180, 220, 255)   -- Light cyan
+local BUTTON_HOVER      = Color3.fromRGB(20, 50, 70)      -- Dark blue-gray hover
+local SUCCESS_COLOR     = Color3.fromRGB(0, 220, 180)     -- Cyan-teal for enabled
+local ERROR_COLOR       = Color3.fromRGB(255, 80, 120)    -- Coral red for disabled
+
+-- ===================== GUI BUILD =====================
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "NotixGui"
+screenGui.ResetOnSpawn = false
+screenGui.IgnoreGuiInset = true
+local PG = LP:WaitForChild("PlayerGui")
+screenGui.Parent = PG
+
+local guiVisible = true
+
+local function hideGui()
+	if main then main.Visible = false end
+	if mini then mini.Visible = false end
+	if pbFrame then pbFrame.Visible = false end
+	if mbPanel then mbPanel.Visible = false end
+	guiVisible = false
+end
+
+local function showGui()
+	if main then main.Visible = true end
+	if mini then mini.Visible = true end
+	if pbFrame then pbFrame.Visible = true end
+	if mbPanel then mbPanel.Visible = true end
+	guiVisible = true
+end
+
+-- Main frame
+local main = Instance.new("Frame")
+main.Name = "MainFrame"
+main.Size = UDim2.new(0, 320, 0, 500)
+main.Position = UDim2.new(0, 40, 0, 40)
+main.BackgroundColor3 = DARK_BG
+main.BorderSizePixel = 0
+main.Parent = screenGui
+
+Instance.new("UICorner", main).CornerRadius = UDim.new(0, 12)
+Instance.new("UIStroke", main).Color = BORDER1
+
+-- Mini frame
+local mini = Instance.new("Frame")
+mini.Name = "MiniFrame"
+mini.Size = UDim2.new(0, 120, 0, 140)
+mini.Position = UDim2.new(0, 40, 0, 560)
+mini.BackgroundColor3 = DARK_BG
+mini.BorderSizePixel = 0
+mini.Parent = screenGui
+
+Instance.new("UICorner", mini).CornerRadius = UDim.new(0, 12)
+Instance.new("UIStroke", mini).Color = BORDER1
+
+-- Progress bar frame
+local pbFrame = Instance.new("Frame")
+pbFrame.Name = "ProgressBarFrame"
+pbFrame.Size = UDim2.new(0, 240, 0, 70)
+pbFrame.Position = UDim2.new(0.5, -120, 1, -65)
+pbFrame.BackgroundColor3 = DARK_BG
+pbFrame.BorderSizePixel = 0
+pbFrame.Parent = screenGui
+
+Instance.new("UICorner", pbFrame).CornerRadius = UDim.new(0, 12)
+Instance.new("UIStroke", pbFrame).Color = BORDER1
+
+-- Progress fill
+progressFill = Instance.new("Frame")
+progressFill.Name = "ProgressFill"
+progressFill.Size = UDim2.new(0, 0, 1, 0)
+progressFill.BackgroundColor3 = SUCCESS_COLOR
+progressFill.BorderSizePixel = 0
+progressFill.Parent = pbFrame
+
+Instance.new("UICorner", progressFill).CornerRadius = UDim.new(0, 10)
+
+-- Progress percentage text
+progressPct = Instance.new("TextLabel")
+progressPct.Name = "ProgressPercentage"
+progressPct.Size = UDim2.new(1, 0, 1, 0)
+progressPct.BackgroundTransparency = 1
+progressPct.Text = "0%"
+progressPct.TextColor3 = TEXT_PRIMARY
+progressPct.TextScaled = true
+progressPct.Font = Enum.Font.GothamBold
+progressPct.Parent = pbFrame
+
+-- Progress radius label
+progressRadLbl = Instance.new("TextLabel")
+progressRadLbl.Name = "RadiusLabel"
+progressRadLbl.Size = UDim2.new(1, 0, 0, 20)
+progressRadLbl.Position = UDim2.new(0, 0, 1, 5)
+progressRadLbl.BackgroundTransparency = 1
+progressRadLbl.Text = "Radius: 20"
+progressRadLbl.TextColor3 = TEXT_SECONDARY
+progressRadLbl.TextSize = 10
+progressRadLbl.Font = Enum.Font.Gotham
+progressRadLbl.Parent = pbFrame
+
+-- Mode value label
+modeValLbl = Instance.new("TextLabel")
+modeValLbl.Name = "ModeLabel"
+modeValLbl.Size = UDim2.new(0.5, -5, 0, 30)
+modeValLbl.Position = UDim2.new(0, 10, 0, 10)
+modeValLbl.BackgroundColor3 = DARKER_BG
+modeValLbl.BorderSizePixel = 0
+modeValLbl.Text = "Normal"
+modeValLbl.TextColor3 = TEXT_PRIMARY
+modeValLbl.Font = Enum.Font.GothamBold
+modeValLbl.Parent = mini
+
+Instance.new("UICorner", modeValLbl).CornerRadius = UDim.new(0, 6)
+Instance.new("UIStroke", modeValLbl).Color = BORDER2
+
+-- Utility function to create toggle buttons
+local function createToggleButton(parent, name, position, callback)
+	local btn = Instance.new("TextButton")
+	btn.Name = name
+	btn.Size = UDim2.new(1, -20, 0, 35)
+	btn.Position = position
+	btn.BackgroundColor3 = DARKER_BG
+	btn.BorderSizePixel = 0
+	btn.Text = name
+	btn.TextColor3 = TEXT_PRIMARY
+	btn.Font = Enum.Font.GothamBold
+	btn.TextSize = 12
+	btn.Parent = parent
+
+	Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
+	Instance.new("UIStroke", btn).Color = BORDER2
+
+	btn.MouseEnter:Connect(function()
+		TweenService:Create(btn, TweenInfo.new(0.15), {BackgroundColor3 = BUTTON_HOVER}):Play()
+	end)
+
+	btn.MouseLeave:Connect(function()
+		TweenService:Create(btn, TweenInfo.new(0.15), {BackgroundColor3 = DARKER_BG}):Play()
+	end)
+
+	btn.MouseButton1Click:Connect(callback)
+	return btn
+end
+
+-- Create main scrolling list
+local mainScroll = Instance.new("ScrollingFrame")
+mainScroll.Name = "MainScroll"
+mainScroll.Size = UDim2.new(1, -10, 1, -50)
+mainScroll.Position = UDim2.new(0, 5, 0, 45)
+mainScroll.BackgroundTransparency = 1
+mainScroll.BorderSizePixel = 0
+mainScroll.CanvasSize = UDim2.new(0, 0, 0, 1000)
+mainScroll.ScrollBarThickness = 6
+mainScroll.Parent = main
+
+local mainLayout = Instance.new("UIListLayout")
+mainLayout.Padding = UDim.new(0, 8)
+mainLayout.Parent = mainScroll
+
+-- Add speed section
+local speedLabel = Instance.new("TextLabel")
+speedLabel.Name = "SpeedLabel"
+speedLabel.Size = UDim2.new(1, 0, 0, 20)
+speedLabel.BackgroundTransparency = 1
+speedLabel.Text = "⚡ SPEED SETTINGS"
+speedLabel.TextColor3 = PRIMARY_COLOR
+speedLabel.TextSize = 11
+speedLabel.Font = Enum.Font.GothamBlack
+speedLabel.TextXAlignment = Enum.TextXAlignment.Left
+speedLabel.Parent = mainScroll
+
+normalBox = Instance.new("TextBox")
+normalBox.Name = "NormalSpeed"
+normalBox.Size = UDim2.new(0.5, -4, 0, 28)
+normalBox.BackgroundColor3 = DARKER_BG
+normalBox.BorderSizePixel = 0
+normalBox.Text = tostring(NS)
+normalBox.TextColor3 = TEXT_PRIMARY
+normalBox.Font = Enum.Font.Gotham
+normalBox.Parent = mainScroll
+
+Instance.new("UICorner", normalBox).CornerRadius = UDim.new(0, 6)
+Instance.new("UIStroke", normalBox).Color = BORDER2
+
+carryBox = Instance.new("TextBox")
+carryBox.Name = "CarrySpeed"
+carryBox.Size = UDim2.new(0.5, -4, 0, 28)
+carryBox.BackgroundColor3 = DARKER_BG
+carryBox.BorderSizePixel = 0
+carryBox.Text = tostring(CS)
+carryBox.TextColor3 = TEXT_PRIMARY
+carryBox.Font = Enum.Font.Gotham
+carryBox.Parent = mainScroll
+
+Instance.new("UICorner", carryBox).CornerRadius = UDim.new(0, 6)
+Instance.new("UIStroke", carryBox).Color = BORDER2
+
+laggerBox = Instance.new("TextBox")
+laggerBox.Name = "LaggerSpeed"
+laggerBox.Size = UDim2.new(1, 0, 0, 28)
+laggerBox.BackgroundColor3 = DARKER_BG
+laggerBox.BorderSizePixel = 0
+laggerBox.Text = tostring(LS)
+laggerBox.TextColor3 = TEXT_PRIMARY
+laggerBox.Font = Enum.Font.Gotham
+laggerBox.Parent = mainScroll
+
+Instance.new("UICorner", laggerBox).CornerRadius = UDim.new(0, 6)
+Instance.new("UIStroke", laggerBox).Color = BORDER2
+
+-- Auto Steal section
+local stealLabel = Instance.new("TextLabel")
+stealLabel.Name = "StealLabel"
+stealLabel.Size = UDim2.new(1, 0, 0, 20)
+stealLabel.BackgroundTransparency = 1
+stealLabel.Text = "🎯 STEAL SETTINGS"
+stealLabel.TextColor3 = PRIMARY_COLOR
+stealLabel.TextSize = 11
+stealLabel.Font = Enum.Font.GothamBlack
+stealLabel.TextXAlignment = Enum.TextXAlignment.Left
+stealLabel.Parent = mainScroll
+
+radInput = Instance.new("TextBox")
+radInput.Name = "RadiusInput"
+radInput.Size = UDim2.new(0.5, -4, 0, 28)
+radInput.BackgroundColor3 = DARKER_BG
+radInput.BorderSizePixel = 0
+radInput.Text = tostring(Steal.StealRadius)
+radInput.TextColor3 = TEXT_PRIMARY
+radInput.Font = Enum.Font.Gotham
+radInput.Parent = mainScroll
+
+Instance.new("UICorner", radInput).CornerRadius = UDim.new(0, 6)
+Instance.new("UIStroke", radInput).Color = BORDER2
+
+durationInput = Instance.new("TextBox")
+durationInput.Name = "DurationInput"
+durationInput.Size = UDim2.new(0.5, -4, 0, 28)
+durationInput.BackgroundColor3 = DARKER_BG
+durationInput.BorderSizePixel = 0
+durationInput.Text = tostring(Steal.StealDuration)
+durationInput.TextColor3 = TEXT_PRIMARY
+durationInput.Font = Enum.Font.Gotham
+durationInput.Parent = mainScroll
+
+Instance.new("UICorner", durationInput).CornerRadius = UDim.new(0, 6)
+Instance.new("UIStroke", durationInput).Color = BORDER2
+
+-- Features section
+local featuresLabel = Instance.new("TextLabel")
+featuresLabel.Name = "FeaturesLabel"
+featuresLabel.Size = UDim2.new(1, 0, 0, 20)
+featuresLabel.BackgroundTransparency = 1
+featuresLabel.Text = "✨ FEATURES"
+featuresLabel.TextColor3 = PRIMARY_COLOR
+featuresLabel.TextSize = 11
+featuresLabel.Font = Enum.Font.GothamBlack
+featuresLabel.TextXAlignment = Enum.TextXAlignment.Left
+featuresLabel.Parent = mainScroll
+
+-- Create feature toggle buttons
+setAutoStealVisual = function(enabled)
+	-- Update button visual
+end
+
+setInfJumpVisual = function(enabled)
+	-- Update button visual
+end
+
+setAntiRagVisual = function(enabled)
+	-- Update button visual
+end
+
+setMedusaVisual = function(enabled)
+	-- Update button visual
+end
+
+setUnwalkVisual = function(enabled)
+	-- Update button visual
+end
+
+setStretchRezVisual = function(enabled)
+	-- Update button visual
+end
+
+setBatCounterVisual = function(enabled)
+	-- Update button visual
+end
+
+setLaggerVisual = function(enabled)
+	-- Update button visual
+end
+
+setFloat = function(enabled)
+	-- Update button visual
+end
+
+floatHeightBox = Instance.new("TextBox")
+floatHeightBox.Name = "FloatHeight"
+floatHeightBox.Size = UDim2.new(1, 0, 0, 28)
+floatHeightBox.BackgroundColor3 = DARKER_BG
+floatHeightBox.BorderSizePixel = 0
+floatHeightBox.Text = tostring(floatHeight)
+floatHeightBox.TextColor3 = TEXT_PRIMARY
+floatHeightBox.Font = Enum.Font.Gotham
+floatHeightBox.Parent = mainScroll
+
+Instance.new("UICorner", floatHeightBox).CornerRadius = UDim.new(0, 6)
+Instance.new("UIStroke", floatHeightBox).Color = BORDER2
+
+-- Main frame header
+local mainHeader = Instance.new("TextLabel")
+mainHeader.Name = "Header"
+mainHeader.Size = UDim2.new(1, 0, 0, 40)
+mainHeader.BackgroundColor3 = DARKER_BG
+mainHeader.BorderSizePixel = 0
+mainHeader.Text = "📡 NOTIX HUB"
+mainHeader.TextColor3 = PRIMARY_COLOR
+mainHeader.TextScaled = true
+mainHeader.Font = Enum.Font.GothamBlack
+mainHeader.Parent = main
+
+Instance.new("UICorner", mainHeader).CornerRadius = UDim.new(0, 12)
+
+-- Settings tab section
+local function lo(tab) return {"Speed", "Combat", "Movement", "Settings"}[({Speed=1,Combat=2,Movement=3,Settings=4})[tab] or 4] end
+
+local b = Instance.new("TextButton")
+b.Name = "ResetMobilePanelPosition"
+b.Size = UDim2.new(1, 0, 0, 38)
+b.BackgroundColor3 = DARKER_BG
+b.BorderSizePixel = 0
+b.Text = "Reset Mobile Panel Position"
+b.TextColor3 = TEXT_PRIMARY
+b.Font = Enum.Font.GothamBlack
+b.TextSize = 10
+b.LayoutOrder = lo("Settings")
+b.ZIndex = 5
+b.Parent = mainScroll
+
+Instance.new("UICorner", b).CornerRadius = UDim.new(0, 9)
+Instance.new("UIStroke", b).Color = BORDER2
+
+b.MouseEnter:Connect(function() TweenService:Create(b, TweenInfo.new(0.1), {BackgroundColor3 = BUTTON_HOVER}):Play() end)
+b.MouseLeave:Connect(function() TweenService:Create(b, TweenInfo.new(0.1), {BackgroundColor3 = DARKER_BG}):Play() end)
+
+b.MouseButton1Click:Connect(function()
+	main.Position = UDim2.new(0, 40, 0, 40)
+	mini.Position = UDim2.new(0, 40, 0, 40)
+	pbFrame.Position = UDim2.new(0.5, -120, 1, -65)
+	-- Reset each mobile button to its default grid position
+	local baseRight  = MB_TOTAL_W + 8
+	local baseOffsetY = -(MB_TOTAL_H / 2)
+	local idx = 0
+	for _, child in ipairs(mbPanelButtons) do
+		if child:IsA("TextButton") then
+			local row = math.floor(idx / MB_COLS) + 1
+			local col = (idx % MB_COLS) + 1
+			local x_offset = -(baseRight) + MB_PAD + (col - 1) * (MB_BTN_W + MB_PAD)
+			local y_offset = baseOffsetY + MB_PAD + (row - 1) * (MB_BTN_H + MB_PAD)
+			child.Position = UDim2.new(1, x_offset, 0.5, y_offset)
+			idx = idx + 1
+		end
+	end
+end)
+
+-- ===== GLOBAL INPUT HANDLER =====
+UIS.InputBegan:Connect(function(inp, gp)
+	if gp or _anyKeyListening then return end
+	local kc = inp.KeyCode
+	-- Accept both keyboard and gamepad button presses
+	local isKeyboard = inp.UserInputType == Enum.UserInputType.Keyboard
+	local isGamepad  = inp.UserInputType == Enum.UserInputType.Gamepad1
+		or inp.UserInputType == Enum.UserInputType.Gamepad2
+		or inp.UserInputType == Enum.UserInputType.Gamepad3
+		or inp.UserInputType == Enum.UserInputType.Gamepad4
+	if not isKeyboard and not isGamepad then return end
+	if kbMatch(KB.SpeedToggle, kc) then
+		speedMode = not speedMode
+		if modeValLbl then modeValLbl.Text = speedMode and "Carry" or "Normal" end
+	elseif kbMatch(KB.LaggerMode, kc) then
+		laggerMode = not laggerMode
+		if setLaggerVisual then setLaggerVisual(laggerMode) end
+		if laggerMode then startLaggerMode() else stopLaggerMode() end
+	elseif kbMatch(KB.AutoBat, kc) then
+		autoBatEnabled = not autoBatEnabled
+		if autoBatEnabled then
+			if autoLeftEnabled then autoLeftEnabled = false; if autoLeftSetVisual then autoLeftSetVisual(false) end; stopAutoLeft() end
+			if autoRightEnabled then autoRightEnabled = false; if autoRightSetVisual then autoRightSetVisual(false) end; stopAutoRight() end
+		end
+		if autoBatSetVisual then autoBatSetVisual(autoBatEnabled) end
+	elseif kbMatch(KB.AutoLeft, kc) then
+		autoLeftEnabled = not autoLeftEnabled
+		if autoLeftEnabled then
+			if autoRightEnabled then autoRightEnabled = false; if autoRightSetVisual then autoRightSetVisual(false) end; stopAutoRight() end
+			if autoBatEnabled then autoBatEnabled = false; if autoBatSetVisual then autoBatSetVisual(false) end end
+			startAutoLeft()
+		else
+			stopAutoLeft()
+		end
+		if autoLeftSetVisual then autoLeftSetVisual(autoLeftEnabled) end
+	elseif kbMatch(KB.AutoRight, kc) then
+		autoRightEnabled = not autoRightEnabled
+		if autoRightEnabled then
+			if autoLeftEnabled then autoLeftEnabled = false; if autoLeftSetVisual then autoLeftSetVisual(false) end; stopAutoLeft() end
+			if autoBatEnabled then autoBatEnabled = false; if autoBatSetVisual then autoBatSetVisual(false) end end
+			startAutoRight()
+		else
+			stopAutoRight()
+		end
+		if autoRightSetVisual then autoRightSetVisual(autoRightEnabled) end
+	elseif kbMatch(KB.DropBrainrot, kc) then
+		task.spawn(runDrop)
+	elseif kbMatch(KB.TPDown, kc) then
+		task.spawn(runTPDown)
+	elseif kbMatch(KB.Float, kc) then
+		floatEnabled = not floatEnabled
+		if setFloat then setFloat(floatEnabled) end
+		if floatEnabled then floatJumping = false; startFloat() else stopFloat() end
+	elseif kbMatch(KB.GuiHide, kc) then
+		if guiVisible then hideGui() else showGui() end
+	end
+end)
+
+-- ===== RADIUS LABEL UPDATER =====
+task.spawn(function()
+	while task.wait(0.5) do
+		pcall(function()
+			if progressRadLbl then progressRadLbl.Text = "Radius: " .. Steal.StealRadius end
+		end)
+	end
+end)
+
+-- ===== LOAD CONFIG =====
+local function loadConfig()
+	if not(isfile and isfile("NotixConfig.json")) then return end
+	local ok, cfg = pcall(function() return HttpService:JSONDecode(readfile("NotixConfig.json")) end)
+	if not ok or not cfg then return end
+	local function lk(entry, data)
+		if type(data) ~= "table" then return end
+		if data.kb and Enum.KeyCode[data.kb] then entry.kb = Enum.KeyCode[data.kb] end
+		if data.gp and Enum.KeyCode[data.gp] then entry.gp = Enum.KeyCode[data.gp] end
+	end
+	if cfg.normalSpeed then NS = cfg.normalSpeed; if normalBox then normalBox.Text = tostring(NS) end end
+	if cfg.carrySpeed then CS = cfg.carrySpeed; if carryBox then carryBox.Text = tostring(CS) end end
+	if cfg.laggerSpeed then LS = cfg.laggerSpeed; if laggerBox then laggerBox.Text = tostring(LS) end end
+	if cfg.grabRadius then
+		Steal.StealRadius = cfg.grabRadius
+		if progressRadLbl then progressRadLbl.Text = "Radius: " .. cfg.grabRadius end
+	end
+	if cfg.stealDuration then
+		Steal.StealDuration = cfg.stealDuration
+		if durationInput then durationInput.Text = tostring(cfg.stealDuration) end
+	end
+	if cfg.floatHeight then
+		floatHeight = cfg.floatHeight
+		if floatHeightBox then floatHeightBox.Text = tostring(cfg.floatHeight) end
+	end
+	lk(KB.DropBrainrot, cfg.dropBrainrotKey); lk(KB.AutoLeft, cfg.autoLeftKey)
+	lk(KB.AutoRight, cfg.autoRightKey); lk(KB.AutoBat, cfg.autoBatKey)
+	lk(KB.LaggerMode, cfg.laggerModeKey); lk(KB.GuiHide, cfg.guiHideKey)
+	lk(KB.Float, cfg.floatKey); lk(KB.SpeedToggle, cfg.speedToggleKey)
+	lk(KB.TPDown, cfg.tpDownKey)
+	if cfg.antiRagdoll then antiRagdollEnabled = true; if setAntiRagVisual then setAntiRagVisual(true) end; startAntiRagdoll() end
+	if cfg.autoStealEnabled then Steal.AutoStealEnabled = true; if setAutoStealVisual then setAutoStealVisual(true) end; pcall(startAutoSteal) end
+	if cfg.infiniteJump then infJumpEnabled = true; if setInfJumpVisual then setInfJumpVisual(true) end; startInfiniteJump() end
+	if cfg.medusaCounter then medusaCounterEnabled = true; if setMedusaVisual then setMedusaVisual(true) end; setupMedusa(LP.Character) end
+	if cfg.batCounter then batCounterEnabled = true; if setBatCounterVisual then setBatCounterVisual(true) end; startBatCounter() end
+	if cfg.laggerMode then laggerMode = true; if setLaggerVisual then setLaggerVisual(true) end; startLaggerMode() end
+	if cfg.carryMode then speedMode = true; if modeValLbl then modeValLbl.Text = "Carry" end end
+	if cfg.autoBat then autoBatEnabled = true; if autoBatSetVisual then autoBatSetVisual(true) end end
+	if cfg.unwalkEnabled then
+		unwalkEnabled = true
+		if setUnwalkVisual then setUnwalkVisual(true) end
+		task.spawn(function() task.wait(0.5); disableAnimations() end)
+	end
+	if cfg.floatEnabled then
+		floatEnabled = true; if setFloat then setFloat(true) end; floatJumping = false; startFloat()
+	end
+	if cfg.stretchRez then
+		stretchRezEnabled = true; if setStretchRezVisual then setStretchRezVisual(true) end; enableStretchRez()
+	end
+	-- Restore mobile button size (applyBtnSize may not be defined yet if loadConfig called early, guard it)
+	if cfg.mbBtnW and cfg.mbBtnH and mbPanel then
+		pcall(function()
+			local w = math.clamp(cfg.mbBtnW, 44, 120)
+			local h = math.clamp(cfg.mbBtnH, 44, 120)
+			MB_BTN_W = w; MB_BTN_H = h
+			MB_TOTAL_W = MB_COLS * MB_BTN_W + (MB_COLS + 1) * MB_PAD
+			MB_TOTAL_H = MB_ROWS * MB_BTN_H + (MB_ROWS + 1) * MB_PAD
+			mbPanel.Size = UDim2.new(0, MB_TOTAL_W, 0, MB_TOTAL_H)
+			local baseRight  = MB_TOTAL_W + 8
+			local baseOffsetY = -(MB_TOTAL_H / 2)
+			local idx = 0
+			for _, child in ipairs(mbPanelButtons) do
+				if child:IsA("TextButton") then
+					local row = math.floor(idx / MB_COLS) + 1
+					local col = (idx % MB_COLS) + 1
+					local x_offset = -(baseRight) + MB_PAD + (col - 1) * (MB_BTN_W + MB_PAD)
+					local y_offset = baseOffsetY + MB_PAD + (row - 1) * (MB_BTN_H + MB_PAD)
+					child.Size = UDim2.new(0, MB_BTN_W, 0, MB_BTN_H)
+					child.Position = UDim2.new(1, x_offset, 0.5, y_offset)
+					idx = idx + 1
+				end
+			end
+		end)
+	end
+	-- Restore individual floating button positions LAST so size-reset above doesn't overwrite them
+	if cfg.mbBtnPositions and type(cfg.mbBtnPositions) == "table" then
+		pcall(function()
+			for i, btn in ipairs(mbPanelButtons) do
+				local p = cfg.mbBtnPositions[i]
+				if p then
+					btn.Position = UDim2.new(p.xs or 0, p.xo or 0, p.ys or 0, p.yo or 0)
+				end
+			end
+		end)
+	end
+end
+
+switchTab = function(tab)
+	-- Tab switching function
+end
+
+switchTab("Speed")
+loadConfig()
+print("[Notix Hub v2.1] Loaded!")
